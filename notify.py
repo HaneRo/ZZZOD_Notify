@@ -8,6 +8,7 @@ import logging
 import sys
 from dataclasses import dataclass
 from typing import List, Dict, Any
+from datetime import datetime, timedelta
 
 # 配置数据类
 @dataclass
@@ -30,7 +31,6 @@ def init_logging():
 
 # 进程检测
 def is_process_running(process_name: str) -> bool:
-    """优化后的进程检测函数"""
     return any(
         proc.info["name"] == process_name
         for proc in psutil.process_iter(["name"])
@@ -38,7 +38,6 @@ def is_process_running(process_name: str) -> bool:
 
 # 配置加载
 def load_config(yaml_path: str) -> AppConfig:
-    """加载应用配置"""
     try:
         with open(yaml_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
@@ -55,7 +54,6 @@ def load_config(yaml_path: str) -> AppConfig:
 
 # 通知发送
 def send_notification(message: str, config: AppConfig) -> None:
-    """带错误处理的通知发送"""
     proxies = {
         "http://": config.proxy,
         "https://": config.proxy,
@@ -78,10 +76,31 @@ def send_notification(message: str, config: AppConfig) -> None:
     except Exception as e:
         logging.error(f"通知发送失败: {str(e)}")
 
-# 日志读取
+def parse_log_time(time_str: str) -> datetime:
+    """解析日志时间并处理跨天情况"""
+    try:
+        log_time = datetime.strptime(time_str, "%H:%M:%S.%f").time()
+        now = datetime.now()
+        today_date = now.date()
+        
+        # 组合当前日期和日志时间
+        log_datetime = datetime.combine(today_date, log_time)
+        
+        # 处理跨天情况（如果日志时间晚于当前时间，则视为前一天）
+        if log_datetime > now:
+            log_datetime -= timedelta(days=1)
+            
+        return log_datetime
+    except ValueError as e:
+        raise ValueError(f"无效时间格式: {time_str}") from e
+
+# 日志读取（添加时间过滤）
 def read_log_files(log_paths: List[str]) -> str:
-    """智能日志读取"""
+    """读取并过滤最近3小时的日志"""
     combined = []
+    time_pattern = re.compile(r"^\[(\d{2}:\d{2}:\d{2}\.\d{3})\]")
+    three_hours_ago = datetime.now() - timedelta(hours=3)
+    
     for path in log_paths:
         try:
             if not os.path.exists(path):
@@ -89,8 +108,23 @@ def read_log_files(log_paths: List[str]) -> str:
                 continue
 
             with open(path, "r", encoding="utf-8") as f:
-                # 使用生成器表达式处理大文件
-                combined.extend(line.strip() for line in f if line.strip())
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    # 提取时间戳
+                    match = time_pattern.match(line)
+                    if not match:
+                        continue
+                    
+                    try:
+                        log_time = parse_log_time(match.group(1))
+                        if log_time >= three_hours_ago:
+                            combined.append(line)
+                    except Exception as e:
+                        logging.warning(f"时间解析失败: {line[:50]}... ({str(e)})")
+                        
         except UnicodeDecodeError:
             logging.error(f"文件编码错误: {path}")
         except Exception as e:
@@ -100,10 +134,8 @@ def read_log_files(log_paths: List[str]) -> str:
 
 # 日志处理
 def process_instructions(allowed_instructions: List[str], log_text: str) -> List[Dict[str, Any]]:
-    """优化后的日志处理"""
-    # 预编译正则表达式
     instr_pattern = re.compile(
-        r"^.*指令\s*\[\s*({})\s*\]\s*执行\s*(\S+)".format(
+        r"指令\s*\[\s*({})\s*\]\s.*执行\s*(\S+)".format(
             "|".join(fr"\s*{re.escape(i)}\s*" for i in allowed_instructions)
         ),
         re.IGNORECASE
@@ -115,30 +147,24 @@ def process_instructions(allowed_instructions: List[str], log_text: str) -> List
     }
 
     for line in log_text.split("\n"):
-        if not line:
-            continue
-
         match = instr_pattern.search(line)
         if match:
             raw_instr = match.group(1).strip()
             status = match.group(2).upper()
 
-            # 匹配允许的指令（保留大小写）
             matched_instr = next(
                 (instr for instr in allowed_instructions
                  if raw_instr.lower() == instr.lower()),
                 None
             )
 
-            if not matched_instr:
-                continue
-
-            record = instruction_states[matched_instr]
-            if status == "成功" and not record["is_success"]:
-                record["is_success"] = True
-                record["states"].append(status)
-            elif not record["is_success"]:
-                record["states"].append(status)
+            if matched_instr:
+                record = instruction_states[matched_instr]
+                if status == "成功" and not record["is_success"]:
+                    record["is_success"] = True
+                    record["states"].append(status)
+                elif not record["is_success"]:
+                    record["states"].append(status)
 
     return [
         {
@@ -152,7 +178,6 @@ def process_instructions(allowed_instructions: List[str], log_text: str) -> List
 
 # 消息格式化
 def format_message(results: List[Dict[str, Any]]) -> str:
-    """生成格式化消息"""
     success = []
     failure = []
 
@@ -170,7 +195,7 @@ def format_message(results: List[Dict[str, Any]]) -> str:
     if success:
         parts.append(f"成功指令：{', '.join(success)}")
     else:
-        parts.append(f"，全部失败❌")
+        parts.append(f"全部失败❌")
     return "\n".join(parts) if parts else "⚠️ 未检测到有效指令状态"
 
 # 主程序
@@ -180,7 +205,7 @@ def main():
     check_interval = 60  # 初始检测间隔
     max_interval = 300   # 最大检测间隔
 
-    logging.info("进程监控启动")
+    logging.info("进程监控启动（3小时日志过滤已启用）")
 
     while True:
         try:
@@ -189,8 +214,8 @@ def main():
                 
                 logs = read_log_files([".log/log.txt"])
                 if not logs:
-                    raise ValueError("未找到有效日志内容")
-
+                    raise ValueError("最近3小时内未找到有效日志")
+                
                 results = process_instructions(config.allowed, logs)
                 message = format_message(results)
                 
