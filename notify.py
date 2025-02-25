@@ -25,7 +25,7 @@ def init_logging():
         format="%(asctime)s - %(levelname)s - %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler("monitor.log", encoding="utf-8")
+            logging.FileHandler(os.path.join(".log","notify.log"), encoding="utf-8")
         ]
     )
 
@@ -54,13 +54,8 @@ def load_config(yaml_path: str) -> AppConfig:
 
 # 通知发送
 def send_notification(message: str, config: AppConfig) -> None:
-    proxies = {
-        "http://": config.proxy,
-        "https://": config.proxy,
-    }
-    
     try:
-        with httpx.Client(proxies=proxies, timeout=10) as client:
+        with httpx.Client(proxy=config.proxy, timeout=10) as client:
             response = client.post(
                 f"https://api.telegram.org/bot{config.bot_token}/sendMessage",
                 json={
