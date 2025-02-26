@@ -201,10 +201,12 @@ def main():
     max_interval = 300   # 最大检测间隔
 
     logging.info("进程监控启动（3小时日志过滤已启用）")
-
     while True:
         try:
-            if not is_process_running("OneDragon Scheduler.exe"):
+            # 动态调整检测间隔
+            time.sleep(check_interval)
+            check_interval = min(check_interval * 1.5, max_interval)
+            if not is_process_running("OneDragon Scheduler.exe") and not is_process_running("ZenlessZoneZero.exe"):
                 logging.warning("目标进程未运行，开始处理日志")
                 
                 logs = read_log_files([".log/log.txt"])
@@ -219,10 +221,6 @@ def main():
                 
                 logging.info("程序正常退出")
                 sys.exit(0)
-
-            # 动态调整检测间隔
-            check_interval = min(check_interval * 1.5, max_interval)
-            time.sleep(check_interval)
 
         except KeyboardInterrupt:
             logging.info("用户手动终止监控")
