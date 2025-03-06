@@ -1,7 +1,10 @@
 notify:
-  bot_token: ''
-  chat_id: ''
-  proxy : 'socks5://127.0.0.1:7890'
-  list: ["一条龙","进入游戏","兑换码","邮件","影像店营业","刮刮卡","咖啡店","体力刷本","活跃度奖励","丽都城募","丽都周纪(领奖励)","迷失之地"]
+  TG_BOT_TOKEN: ''
+  TG_USER_ID: ''
+  TG_PROXY_HOST: '127.0.0.1'
+  TG_PROXY_PORT: '7890'             # proxy : 'http://127.0.0.1:7890'  现仅支持http类型的代理
+  PUSH_KEY: ''                      # server 酱的 PUSH_KEY，兼容旧版与 Turbo 版
+  HITOKOTO: 'false'                 #一言
+list: ["一条龙","进入游戏","兑换码","邮件","影像店营业","刮刮卡","咖啡店","体力刷本","活跃度奖励","丽都城募","丽都周纪(领奖励)","迷失之地"]
 
-# list字段填写关注执行状态的项目，bot_token和user_id填写telegram机器人token和接受消息的用户ID
+# list字段填写关注执行状态的项目，bot_token和user_id填写telegram机器人token和接受消息的用户ID 需要什么通知从notify.py中的push_config中找，可以添加到环境变量或配置文件中,优先从环境变量中读取

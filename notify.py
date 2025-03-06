@@ -3,20 +3,11 @@ import time
 import re
 import yaml
 import os
-import httpx
 import logging
 import sys
-from dataclasses import dataclass
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
-
-# 配置数据类
-@dataclass
-class AppConfig:
-    allowed: List[str]
-    bot_token: str
-    chat_id: str
-    proxy: str
+import push
 
 # 日志初始化
 def init_logging():
@@ -37,37 +28,28 @@ def is_process_running(process_name: str) -> bool:
     )
 
 # 配置加载
-def load_config(yaml_path: str) -> AppConfig:
+def load_config(yaml_path: str):
     try:
         with open(yaml_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
-            notify_cfg = config["notify"]
-            return AppConfig(
-                allowed=[str(item) for item in notify_cfg["list"]],
-                bot_token=notify_cfg["bot_token"],
-                chat_id=notify_cfg["chat_id"],
-                proxy=notify_cfg["proxy"]
-            )
+            if os.getenv('ZZZOD_notify'):
+                notify_cfg = os.getenv('ZZZOD_notify')
+            else:
+                notify_cfg = config["list"]
+            for k in push.push_config:
+                if os.getenv(k):
+                    push.push_config[k] = os.getenv(k)
+                elif config.get('notify', {}).get(k) is not None:
+                    push.push_config[k] = config.get('notify', {}).get(k)
+            return [str(item) for item in notify_cfg],push.push_config
     except (FileNotFoundError, yaml.YAMLError) as e:
         logging.error(f"配置加载失败: {str(e)}")
         sys.exit(1)
 
 # 通知发送
-def send_notification(message: str, config: AppConfig) -> None:
+def send_notification(message: str, config) -> None:
     try:
-        with httpx.Client(proxy=config.proxy, timeout=10) as client:
-            response = client.post(
-                f"https://api.telegram.org/bot{config.bot_token}/sendMessage",
-                json={
-                    "chat_id": config.chat_id,
-                    "text": message,
-                    "parse_mode": "Markdown"
-                }
-            )
-            response.raise_for_status()
-            logging.info("通知发送成功")
-    except httpx.HTTPError as e:
-        logging.error(f"HTTP错误: {str(e)}")
+        push.send("绝区零一条路运行通知",message,config)
     except Exception as e:
         logging.error(f"通知发送失败: {str(e)}")
 
@@ -196,11 +178,11 @@ def format_message(results: List[Dict[str, Any]]) -> str:
 # 主程序
 def main():
     init_logging()
-    config = load_config("notify.yaml")
+    items,push_config = load_config("notify.yaml")
     check_interval = 60  # 初始检测间隔
     max_interval = 300   # 最大检测间隔
 
-    logging.info("进程监控启动（3小时日志过滤已启用）")
+    logging.info("进程监控启动")
     while True:
         try:
             # 动态调整检测间隔
@@ -213,11 +195,11 @@ def main():
                 if not logs:
                     raise ValueError("最近3小时内未找到有效日志")
                 
-                results = process_instructions(config.allowed, logs)
+                results = process_instructions(items, logs)
                 message = format_message(results)
                 
                 logging.info("处理结果：\n%s", message)
-                send_notification(message, config)
+                send_notification(message, push_config)
                 
                 logging.info("程序正常退出")
                 sys.exit(0)
@@ -227,7 +209,7 @@ def main():
             sys.exit(0)
         except Exception as e:
             logging.exception("发生未处理异常")
-            send_notification(f"⚠️ 监控程序异常：{str(e)}", config)
+            send_notification(f"⚠️ 监控程序异常：{str(e)}", push_config)
             sys.exit(1)
 
 if __name__ == "__main__":
